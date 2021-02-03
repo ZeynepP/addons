@@ -96,48 +96,33 @@ class MatthewsCorrelationCoefficient(tf.keras.metrics.Metric):
         )
 
     # TODO: sample_weights
-    def update_state(self, y_true, y_pred, sample_weight=None):
+   def update_state(self, y_true, y_pred, sample_weight=None):
         y_true = tf.cast(y_true, dtype=self.dtype)
         y_pred = tf.cast(y_pred, dtype=self.dtype)
 
-        true_positive = tf.math.count_nonzero(y_true * y_pred, 0)
-        # true_negative
-        y_true_negative = tf.math.not_equal(y_true, 1.0)
-        y_pred_negative = tf.math.not_equal(y_pred, 1.0)
-        true_negative = tf.math.count_nonzero(
-            tf.math.logical_and(y_true_negative, y_pred_negative), axis=0
+        C = tf.math.confusion_matrix(
+            labels=tf.argmax(y_true, 1),
+            predictions=tf.argmax(y_pred, 1),
+            num_classes=self.num_classes,
+            weights=sample_weight,
+            dtype=self.dtype,
         )
-        # predicted sum
-        pred_sum = tf.math.count_nonzero(y_pred, 0)
-        # Ground truth label sum
-        true_sum = tf.math.count_nonzero(y_true, 0)
-        false_positive = pred_sum - true_positive
-        false_negative = true_sum - true_positive
 
-        # true positive state_update
-        self.true_positives.assign_add(tf.cast(true_positive, self.dtype))
-        # false positive state_update
-        self.false_positives.assign_add(tf.cast(false_positive, self.dtype))
-        # false negative state_update
-        self.false_negatives.assign_add(tf.cast(false_negative, self.dtype))
-        # true negative state_update
-        self.true_negatives.assign_add(tf.cast(true_negative, self.dtype))
+        t_sum = tf.reduce_sum(C, axis=1)
+        p_sum = tf.reduce_sum(C, axis=0)
+
+        n_correct = tf.linalg.trace(C)
+        n_samples = tf.reduce_sum(p_sum)
+
+        cov_ytyp = n_correct * n_samples - tf.tensordot(t_sum, p_sum, axes=1)
+        cov_ypyp = n_samples ** 2 - tf.tensordot(p_sum, p_sum, axes=1)
+        cov_ytyt = n_samples ** 2 - tf.tensordot(t_sum, t_sum, axes=1)
+        self.mcc = cov_ytyp / tf.math.sqrt(cov_ytyt * cov_ypyp)
+        if tf.math.is_nan(self.mcc ) :
+            self.mcc = tf.constant(0, dtype=self.dtype)
 
     def result(self):
-        # numerator
-        numerator1 = self.true_positives * self.true_negatives
-        numerator2 = self.false_positives * self.false_negatives
-        numerator = numerator1 - numerator2
-        # denominator
-        denominator1 = self.true_positives + self.false_positives
-        denominator2 = self.true_positives + self.false_negatives
-        denominator3 = self.true_negatives + self.false_positives
-        denominator4 = self.true_negatives + self.false_negatives
-        denominator = tf.math.sqrt(
-            denominator1 * denominator2 * denominator3 * denominator4
-        )
-        mcc = tf.math.divide_no_nan(numerator, denominator)
-        return mcc
+       return self.mcc
 
     def get_config(self):
         """Returns the serializable config of the metric."""
